@@ -132,7 +132,7 @@ void updateTankStatus(float pressure2, float lastPressureReading) {
         Serial.println(" psi");
 
     } else if (pressure2 >= 2.0 && lastPressureReading > 160) {
-      tft.setTextSize(2);  // Increase font size
+        tft.setTextSize(2);  // Increase font size
 
         tft.fillRect(0, 220, 500, 40, RED);
         tft.setCursor(30, 230);
