@@ -38,11 +38,11 @@ const int TS_BOT = 954;
 
 // Threshold Constants
 #define HIGH_PRESSURE_THRESHOLD 10.0  // Threshold for pressure alarm (psi)
-#define HIGH_TEMP_THRESHOLD 33.0      // Threshold for temperature alarm (°C)
+#define HIGH_TEMP_THRESHOLD 98.0      // Threshold for temperature alarm (°C)
 #define RELEASE_DETECTION_THRESHOLD 2.0  // Threshold to detect pressure release (psi)
 #define PRESSURE_LIMIT 160.0          // Maximum acceptable release pressure (psi)
-#define WATER_HUMIDITY_THRESHOLD 85.0  // Threshold for high humidity in water tank
-#define WATER_TEMP_DIFF_THRESHOLD 5.0  // Significant temp difference between sensors
+#define WATER_HUMIDITY_THRESHOLD 96.0  // Threshold for high humidity in water tank
+#define WATER_TEMP_DIFF_THRESHOLD 45.0  // Significant temp difference between sensors
 
 // Display & Timing Constants
 #define NORMAL_MESSAGE_DURATION 10000  // Duration to show normal messages (ms)
@@ -109,6 +109,11 @@ float currentHumidity = 0.0;
 float currentDhtTempC = 0.0;
 bool currentDhtSuccess = false;
 
+//  Gloal variale for water temperature error
+bool waterHighTempNoReleaseError = false;
+unsigned long waterErrorDisplayStartTime = 0;
+bool waterErrorDisplayActive = false;
+
 // Function prototypes
 bool Touch_getXY(void);
 float readPressure(int pin);
@@ -123,6 +128,7 @@ void updateWaterTankStatus(float waterTemp, float dhtTemp, float humidity);
 void controlPressureRelay(float pressure);
 void controlTemperatureRelay(float temperatureC);
 void triggerAlarm();
+void triggerAlarmError();
 void setupDisplay();
 void resetArduino();
 
@@ -299,7 +305,7 @@ void updatePressureDisplay(float pressure) {
 // Update TFT display with DS18B20 temperature readings
 void updateTemperatureDisplay(float tempC, float tempF) {
     tft.setTextSize(2);
-    tft.fillRect(180, 150, 100, 30, BLACK);
+    tft.fillRect(180, 150, 250, 30, BLACK);
     tft.setCursor(180, 150);
     tft.setTextColor(YELLOW);
     
@@ -388,11 +394,17 @@ void updateWaterTankStatus(float waterTemp, float dhtTemp, float humidity) {
     // Logic to detect water tank T&P valve release:
     // 1. High humidity is a strong indicator
     // 2. Significant temperature difference between sensors may also indicate release
+    bool releaseCondition = (humidity > WATER_HUMIDITY_THRESHOLD) && 
+                        (dhtTemp > WATER_TEMP_DIFF_THRESHOLD);
     
-    bool releaseCondition = (humidity > WATER_HUMIDITY_THRESHOLD) || 
-                            (abs(waterTemp - dhtTemp) > WATER_TEMP_DIFF_THRESHOLD);
+    // New condition: Check for high temperature with no release
+    bool highTempNoRelease = (waterTemp >= HIGH_TEMP_THRESHOLD) && !releaseCondition;
     
+    // Handle normal release condition
     if (releaseCondition) {
+        waterHighTempNoReleaseError = false; // Reset error flag if release is detected
+        waterErrorDisplayActive = false;
+        
         if (!waterTankDisplayActive) {
             waterDisplayStartTime = currentTime;
             waterTankDisplayActive = true;
@@ -411,9 +423,51 @@ void updateWaterTankStatus(float waterTemp, float dhtTemp, float humidity) {
             tft.print("Release at ");
             tft.print(waterTankReleaseTemp, 1);
             tft.print("C");
+
+            triggerAlarm();
         } else {
             waterTankDisplayActive = false;
             // Clear status area after message timeout
+            tft.fillRect(0, 270, 500, 40, BLACK);
+        }
+    }
+    // Handle high temperature with no release error condition
+    else if (highTempNoRelease) {
+        waterHighTempNoReleaseError = true;
+        waterTankDisplayActive = false;
+        
+        if (!waterErrorDisplayActive) {
+            waterErrorDisplayStartTime = currentTime;
+            waterErrorDisplayActive = true;
+        }
+        
+        if (currentTime - waterErrorDisplayStartTime < ERROR_MESSAGE_DURATION) {
+            tft.setTextSize(2);
+            
+            // Water tank error message - lower part
+            tft.fillRect(0, 270, 500, 40, RED);
+            tft.setCursor(20, 280);
+            tft.setTextColor(WHITE);
+            tft.print("WATER TANK ERROR: High temp, no release!");
+        } else {
+            waterErrorDisplayActive = false;
+            // Clear status area after message timeout
+            tft.fillRect(0, 270, 500, 40, BLACK);
+        }
+        
+        // Trigger alarm for this condition
+        triggerAlarmError();
+    }
+    // Reset flags if conditions resolve
+    else {
+        if (waterTemp < HIGH_TEMP_THRESHOLD) {
+            waterHighTempNoReleaseError = false;
+        }
+        
+        // Clear displays if no active messages and not within display timeouts
+        if (!waterTankDisplayActive && !waterErrorDisplayActive && 
+            (currentTime - waterDisplayStartTime >= NORMAL_MESSAGE_DURATION) && 
+            (currentTime - waterErrorDisplayStartTime >= ERROR_MESSAGE_DURATION)) {
             tft.fillRect(0, 270, 500, 40, BLACK);
         }
     }
@@ -433,14 +487,28 @@ void triggerAlarm() {
     }
 }
 
+// Trigger the alarm for error release
+void triggerAlarmError() {
+    digitalWrite(RED_LED_PIN, HIGH);
+    digitalWrite(GREEN_LED_PIN, LOW);
+
+    // Beep twice
+    for (int i = 0; i < 3; i++) {
+        digitalWrite(BUZZER_PIN, HIGH);
+        delay(100);
+        digitalWrite(BUZZER_PIN, LOW);
+        delay(100);
+    }
+}
+
 // Control relay based on air tank pressure
 void controlPressureRelay(float pressure) {
     if (pressure >= HIGH_PRESSURE_THRESHOLD) {
         digitalWrite(RELAY_PIN, HIGH);
-        triggerAlarm();
+        //triggerAlarm();
     } else {
         digitalWrite(RELAY_PIN, LOW);
-        if (readTemperatureC() < HIGH_TEMP_THRESHOLD) {
+        if (pressure < HIGH_PRESSURE_THRESHOLD) {
             // Only reset LEDs if both conditions are normal
             digitalWrite(RED_LED_PIN, LOW);
             digitalWrite(GREEN_LED_PIN, HIGH);
@@ -458,10 +526,10 @@ void controlTemperatureRelay(float temperatureC) {
     
     if (temperatureC >= HIGH_TEMP_THRESHOLD) {
         digitalWrite(RELAY_PIN2, HIGH);
-        triggerAlarm();
+        // triggerAlarm();
     } else {
         digitalWrite(RELAY_PIN2, LOW);
-        if (readPressure(PRESSURE_SENSOR_PIN) < HIGH_PRESSURE_THRESHOLD) {
+        if (temperatureC <= HIGH_TEMP_THRESHOLD) {
             // Only turn off LED if pressure is also normal
             digitalWrite(RED_LED_PIN, LOW);
             digitalWrite(GREEN_LED_PIN, HIGH);
@@ -498,8 +566,8 @@ void loop() {
     // Read sensors at regular intervals (non-blocking)
     if (currentTime - lastSensorReadTime >= SENSOR_READ_INTERVAL) {
         // Air tank readings
-        currentAirPressure = readPressure(PRESSURE_SENSOR_PIN);
-        currentAirValvePressure = readPressure(SECOND_PRESSURE_SENSOR_PIN);
+        // currentAirPressure = readPressure(PRESSURE_SENSOR_PIN);
+        // currentAirValvePressure = readPressure(SECOND_PRESSURE_SENSOR_PIN);
         
         // Water tank readings
         currentWaterTempC = readTemperatureC();
