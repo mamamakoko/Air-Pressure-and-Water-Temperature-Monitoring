@@ -1,141 +1,147 @@
-# Air-Pressure-and-Water-Temperature-Monitoring
+# T&P Valve Testing System
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
-A comprehensive Arduino-based monitoring system for air and water tanks, featuring pressure and temperature alerts, automatic valve control, and a touchscreen interface.
+This Arduino-based system tests Temperature and Pressure (T&P) relief valves commonly used in water heaters and pressure vessels. It provides both pressure and temperature testing capabilities with a user-friendly touchscreen interface.
 
 ## Overview
 
-This project provides a complete solution for monitoring and controlling both air and water tanks, with a focus on safety and early detection of pressure or temperature issues. The system uses an Arduino Mega with a TFT touchscreen display to show real-time sensor data and alert users to potential problems.
+The T&P Valve Testing System is designed to verify the proper operation of safety relief valves by:
+1. Testing pressure release functionality with a controlled air pressure system
+2. Testing temperature release functionality with a controlled water heating system
+
+The system provides real-time monitoring and visual feedback through a TFT touchscreen display, with alerts for both successful valve operation and failure conditions.
 
 ## Features
 
-- **Dual Tank Monitoring**: 
-  - Air tank pressure monitoring via two pressure sensors
-  - Water tank temperature and humidity monitoring via DS18B20 and DHT11 sensors
-
-- **Safety Features**:
-  - Automatic detection of pressure release events
-  - High-pressure and high-temperature alerts
-  - Visual and audible alarms for critical conditions
-  - Relay control for automated system response
-
+- **Dual Testing Modes**:
+  - Pressure testing with controlled air pressure
+  - Temperature testing with controlled water heating
+  
 - **User Interface**:
-  - TFT touchscreen display with real-time readings
-  - Color-coded status messages
-  - On-screen reset button
-  - Serial output for debugging and data logging
-
-- **Non-blocking Design**:
-  - Efficient sensor reading and display updates
-  - Fail-safe error handling for sensor connectivity issues
-  - Cached readings for unreliable sensors
+  - 480x320 TFT color touchscreen with intuitive interface
+  - Visual indicators for test status and results
+  - Simple navigation with touchscreen buttons
+  
+- **Safety Features**:
+  - Visual and audible alarms for test failures and high-pressure/temperature conditions
+  - Automatic shutdown when thresholds are exceeded
+  - Status LEDs for quick visual status indication
+  
+- **Sensors**:
+  - Dual pressure sensors (main tank and relief valve)
+  - Waterproof DS18B20 temperature sensor for water temperature
+  - DHT11 temperature and humidity sensor for steam/release detection
+  
+- **Control System**:
+  - Relay controls for pressure pump and heating element
+  - Adjustable thresholds for testing parameters
 
 ## Hardware Requirements
 
-- Arduino Mega 2560
-- MCUFRIEND TFT LCD Display Shield (or compatible)
-- 2× Pressure sensors (0-300 PSI range with 0.5-4.5V output)
-- DS18B20 temperature sensor
-- DHT11 temperature and humidity sensor  
-- 2× Relay modules
-- Green and red LEDs
+- Arduino Mega 2560 (or compatible)
+- 3.5" or larger TFT touchscreen display compatible with MCUFRIEND library
+- 2x Pressure sensors (0-300 PSI)
+- DS18B20 waterproof temperature sensor
+- DHT11 temperature and humidity sensor
+- 2x Relay modules
 - Buzzer
-- 4.7KΩ pull-up resistor (for DS18B20)
-- Breadboard and jumper wires
+- Status LEDs (red and green)
+- Power supply
+- Pressure pump (for air testing)
+- Heating element (for temperature testing)
 
-## Pin Connections
+## Pin Configuration
 
-| Component | Pin |
-|-----------|-----|
-| First Pressure Sensor | A15 |
-| Second Pressure Sensor | A14 |
-| DHT11 Data | 23 |
-| Air Pressure Relay | 24 |
-| Water Temperature Relay | 25 |
-| Green LED | 26 |
-| Red LED | 27 |
-| Buzzer | 28 |
-| DS18B20 Temperature Sensor | 22 |
-| Touchscreen | A1, A2, 7, 6 |
+```
+PRESSURE_SENSOR_PIN: A15       // First Pressure Sensor (Air Tank Pressure)
+SECOND_PRESSURE_SENSOR_PIN: A14  // Second Pressure Sensor (Air Tank T&P Valve)
+DHT_PIN: 23                    // DHT11 data pin for Water Tank
+RELAY_PIN: 24                  // Relay control for air pressure
+RELAY_PIN2: 25                 // Relay control for water temperature
+BUZZER_PIN: 28                 // Buzzer
+GREEN_LED_PIN: 26              // Green LED (default ON)
+RED_LED_PIN: 27                // Red LED
+TEMP_SENSOR_PIN: 22            // DS18B20 Data Pin for Water Tank
+```
 
-## Software Dependencies
+Touchscreen pins (standard MCUFRIEND configuration):
+```
+YP: A1
+XM: A2
+YM: 7
+XP: 6
+```
 
-The following libraries are required:
+## Required Libraries
 
-- [MCUFRIEND_kbv](https://github.com/prenticedavid/MCUFRIEND_kbv)
-- [Adafruit_GFX](https://github.com/adafruit/Adafruit-GFX-Library)
-- [OneWire](https://github.com/PaulStoffregen/OneWire)
-- [DallasTemperature](https://github.com/milesburton/Arduino-Temperature-Control-Library)
-- [DHT11](https://github.com/adidax/dht11) (or compatible DHT sensor library)
-- [TouchScreen](https://github.com/adafruit/Adafruit_TouchScreen)
+- MCUFRIEND_kbv
+- Adafruit_GFX
+- OneWire
+- DallasTemperature
+- DHT11
+- TouchScreen
 
 ## Installation
 
-1. Install all required libraries using the Arduino Library Manager
-2. Connect all components according to the pin configuration above
+1. Install all required libraries through the Arduino Library Manager
+2. Connect all hardware components according to the pin configuration
 3. Upload the code to your Arduino Mega
-4. Calibrate the touchscreen if necessary by updating the `TS_LEFT`, `TS_RT`, `TS_TOP`, and `TS_BOT` constants
-
-## Configuration
-
-You can customize the system by modifying these constants in the code:
-
-### Sensor Configuration
-```cpp
-#define SENSOR_MAX_PRESSURE 300.0    // Max sensor pressure (psi)
-#define SENSOR_MAX_VOLTAGE 5.0       // Sensor output at max pressure
-#define VOLTAGE_OFFSET 0.5           // Sensor offset voltage
-```
-
-### Alarm Thresholds
-```cpp
-#define HIGH_PRESSURE_THRESHOLD 10.0  // Threshold for pressure alarm (psi)
-#define HIGH_TEMP_THRESHOLD 33.0      // Threshold for temperature alarm (°C)
-#define RELEASE_DETECTION_THRESHOLD 2.0  // Threshold to detect pressure release (psi)
-#define PRESSURE_LIMIT 160.0          // Maximum acceptable release pressure (psi)
-#define WATER_HUMIDITY_THRESHOLD 85.0  // Threshold for high humidity in water tank
-#define WATER_TEMP_DIFF_THRESHOLD 5.0  // Significant temp difference between sensors
-```
-
-### Timing Configuration
-```cpp
-#define NORMAL_MESSAGE_DURATION 10000  // Duration to show normal messages (ms)
-#define ERROR_MESSAGE_DURATION 60000   // Duration to show error messages (ms)
-#define REFRESH_INTERVAL 500           // Display refresh interval (ms)
-#define SENSOR_READ_INTERVAL 100       // Sensor reading interval (ms)
-```
+4. Calibrate the touchscreen if needed (adjust TS_LEFT, TS_RT, TS_TOP, TS_BOT constants)
 
 ## Usage
 
-Once powered on, the system will:
+1. **Starting the System**:
+   - Power on the device
+   - Wait for the splash screen to finish
+   - Press "START" on the main screen
 
-1. Display real-time readings for air pressure, water temperature, and humidity
-2. Monitor for high-pressure or high-temperature conditions
-3. Activate relays to control external devices when thresholds are exceeded
-4. Sound the buzzer and illuminate the red LED during alarm conditions
-5. Display status messages when pressure release events are detected
-6. Output all readings to the serial monitor at 9600 baud
+2. **Running Tests**:
+   - Select "PRESSURE TEST" or "TEMPERATURE TEST" from the test selection screen
+   - Monitor real-time sensor readings during the test
+   - The system will automatically detect valve releases and display results
 
-Pressing the RESET button on the touchscreen will restart the Arduino.
+3. **Interpreting Results**:
+   - For pressure tests, a successful result shows the pressure at which the valve released
+   - For temperature tests, a successful result shows the temperature at which the valve released
+   - Failed tests will indicate why the valve did not operate correctly
+
+4. **After Testing**:
+   - Choose "YES" to run another test
+   - Choose "NO" to return to the start screen
+   - Choose "DONE" to reset the system
+
+## Test Parameters
+
+The system uses the following default parameters:
+
+- Maximum pressure limit: 160.0 PSI
+- High temperature threshold: 100.0°C
+- High pressure threshold: 10.0 PSI (for relay control)
+- Pressure release detection threshold: 2.0 PSI
+- Humidity threshold for water release detection: 96.0%
+
+These parameters can be adjusted in the code by modifying the threshold constants.
 
 ## Troubleshooting
 
-- **Sensor Errors**: If "Error" is displayed instead of a reading, check the sensor connections
-- **Touchscreen Calibration**: If touch input is not working correctly, adjust the touchscreen calibration constants
-- **Pressure Reading Issues**: Verify the pressure sensor power supply and ground connections
-- **DHT11 Reading Failures**: Ensure the DHT11 is powered correctly and the pull-up resistor is installed
+- **Touchscreen Not Responding**: Verify touchscreen calibration values
+- **Inaccurate Pressure Readings**: Check sensor connections and calibration
+- **Temperature Sensor Errors**: Ensure DS18B20 is properly connected with correct pullup resistor
+- **DHT11 Reading Failures**: Check wiring and ensure power supply is stable
 
-## Contributing
+## Safety Notes
 
-Contributions to improve the system are welcome. Please feel free to submit a pull request or open an issue to discuss potential improvements.
+- This system is designed for testing T&P relief valves only
+- Always follow proper safety procedures when working with pressurized systems
+- Never exceed the maximum rated pressure of your testing equipment
+- Ensure adequate ventilation when testing temperature release valves
+- Keep water away from electronic components
 
 ## License
 
-This project is released under the MIT License - see the LICENSE file for details.
+[Include your preferred license information here]
 
-## Acknowledgments
+## Contributing
 
-- The Arduino community for library support
-- MCUFRIEND for the display shield
-- All contributors to the dependent libraries
+Contributions to improve the system are welcome. Please feel free to submit a pull request or open an issue to discuss potential changes or improvements.
