@@ -140,7 +140,7 @@ These parameters can be adjusted in the code by modifying the threshold constant
 
 ## License
 
-[Include your preferred license information here]
+[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
 
 ## Contributing
 
