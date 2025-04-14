@@ -40,6 +40,7 @@ The system provides real-time monitoring and visual feedback through a TFT touch
 ## Hardware Requirements
 
 - Arduino Mega 2560 (or compatible)
+- Arduino Mega Terminal Board
 - 3.5" or larger TFT touchscreen display compatible with MCUFRIEND library
 - 2x Pressure sensors (0-300 PSI)
 - DS18B20 waterproof temperature sensor
