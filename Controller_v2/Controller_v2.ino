@@ -37,10 +37,10 @@ const int TS_BOT = 954;
 #define ADC_RESOLUTION 1023          // ADC resolution
 
 // Threshold Constants
-#define HIGH_PRESSURE_THRESHOLD 10.0  // Threshold for pressure alarm (psi)
-#define HIGH_TEMP_THRESHOLD 100.0      // Threshold for temperature alarm (°C)
-#define RELEASE_DETECTION_THRESHOLD 2.0  // Threshold to detect pressure release (psi)
-#define PRESSURE_LIMIT 160.0          // Maximum acceptable release pressure (psi)
+#define HIGH_PRESSURE_THRESHOLD 50.0  // Threshold for pressure alarm (psi)
+#define HIGH_TEMP_THRESHOLD 110.0      // Threshold for temperature alarm (°C)
+#define RELEASE_DETECTION_THRESHOLD 1.86  // Threshold to detect pressure release (psi)
+#define PRESSURE_LIMIT 50.0          // Maximum acceptable release pressure (psi)
 #define WATER_HUMIDITY_THRESHOLD 96.0  // Threshold for high humidity in water tank
 #define WATER_TEMP_DIFF_THRESHOLD 50.0  // Significant temp difference between sensors
 
@@ -50,7 +50,7 @@ const int TS_BOT = 954;
 #define REFRESH_INTERVAL 500           // Display refresh interval (ms)
 #define SENSOR_READ_INTERVAL 100       // Sensor reading interval (ms)
 #define DHT_READ_RETRY_DELAY 1000      // Time between DHT read retries
-#define SPLASH_SCREEN_DURATION 2000    // Duration to show splash screen (ms)
+// #define SPLASH_SCREEN_DURATION 5000    // Duration to show splash screen (ms)
 
 // Special Values
 #define TEMP_ERROR_VALUE -999.0        // Value to indicate temperature sensor error
@@ -100,6 +100,7 @@ float lastPressureReading = 0.0;    // Store last valid pressure from the first 
 bool lastPressureStored = false;    // Flag to store pressure only once
 bool pressureReleaseDetected = false; // Flag for pressure release
 unsigned long releaseDetectionTime = 0;
+bool pressureLimitExceeded = false;
 
 // Water tank variables
 float lastWaterTankTemp = 0.0;      // Last water tank temperature
@@ -203,8 +204,8 @@ void setup() {
     // Set initial states
     digitalWrite(GREEN_LED_PIN, HIGH);
     digitalWrite(RED_LED_PIN, LOW);
-    digitalWrite(RELAY_PIN, LOW);
-    digitalWrite(RELAY_PIN2, LOW);
+    digitalWrite(RELAY_PIN, HIGH);
+    digitalWrite(RELAY_PIN2, HIGH);
     digitalWrite(BUZZER_PIN, LOW);
 
     // Initialize sensors
@@ -231,16 +232,20 @@ void drawSplashScreen() {
     // Draw title
     tft.setTextSize(4);
     tft.setTextColor(YELLOW);
-    tft.setCursor(40, 100);
+    tft.setCursor(40, 60);
     tft.print("T&P Valve Tester");
     
     // Draw subtitle
     tft.setTextSize(2);
     tft.setTextColor(WHITE);
-    tft.setCursor(100, 180);
+    tft.setCursor(100, 140);
     tft.print("Pressure & Temperature");
-    tft.setCursor(150, 210);
+    tft.setCursor(150, 170);
     tft.print("Testing System");
+    
+    // Initialize and draw the splash screen start button
+    start_btn.initButton(&tft, 240, 230, 240, 60, WHITE, BLUE, WHITE, "START", 2);
+    start_btn.drawButton();
 }
 
 void drawStartScreen() {
@@ -255,7 +260,7 @@ void drawStartScreen() {
     tft.print("is installed correctly.");
     
     // Initialize and draw the start button
-    start_btn.initButton(&tft, 240, 200, 240, 80, WHITE, GREEN, BLACK, "START", 2);
+    start_btn.initButton(&tft, 240, 200, 240, 80, WHITE, GREEN, BLACK, "PROCEED", 2);
     start_btn.drawButton();
 }
 
@@ -269,8 +274,8 @@ void drawTestSelectionScreen() {
     tft.print("Select Test Type");
     
     // Initialize and draw test buttons
-    pressure_btn.initButton(&tft, 240, 120, 340, 70, WHITE, BLUE, BLACK, "PRESSURE TEST", 2);
-    temp_btn.initButton(&tft, 240, 220, 340, 70, WHITE, RED, BLACK, "TEMPERATURE TEST", 2);
+    pressure_btn.initButton(&tft, 240, 120, 340, 70, WHITE, BLUE, BLACK, "PSI TEST", 2);
+    temp_btn.initButton(&tft, 240, 220, 340, 70, WHITE, RED, BLACK, "TEMP TEST", 2);
     
     pressure_btn.drawButton();
     temp_btn.drawButton();
@@ -504,17 +509,6 @@ void updateDHTDisplay(float humidity, float tempC) {
     }
 }
 
-// Non-blocking version of triggerAlarm
-// void startAlarm() {
-//     digitalWrite(RED_LED_PIN, HIGH);
-//     digitalWrite(GREEN_LED_PIN, LOW);
-//     digitalWrite(BUZZER_PIN, HIGH);
-// }
-
-// void stopAlarm() {
-//     digitalWrite(BUZZER_PIN, LOW);
-// }
-
 // Trigger the alarm for alerts
 void triggerAlarm() {
     digitalWrite(RED_LED_PIN, HIGH);
@@ -574,8 +568,11 @@ void updateAirTankStatus(float pressure2, float pressureReading) {
                 tft.print(" psi");
                 
                 // Create success result
-                testResult = "PRESSURE TEST PASSED:Air tank released at" + String(lastPressureReading, 1) + " psi (below limit of " + String(PRESSURE_LIMIT, 1) + " psi).";
+                testResult = "PRESSURE TEST PASSED: Air tank released at " + String(lastPressureReading, 1) + " psi (below limit of " + String(PRESSURE_LIMIT, 1) + " psi).";
                 testSuccess = true;
+
+                // Start alarm
+                triggerAlarm();
             } else {
                 // Error release message
                 tft.fillRect(0, 170, 480, 40, RED);
@@ -588,12 +585,10 @@ void updateAirTankStatus(float pressure2, float pressureReading) {
                 // Create failure result
                 testResult = "PRESSURE TEST FAILED: Air tank released at " + String(lastPressureReading, 1) + " psi (above limit of " + String(PRESSURE_LIMIT, 1) + " psi).";
                 testSuccess = false;
+
+                // Start alarm
+                triggerAlarmError();
             }
-            
-            // Start alarm
-            triggerAlarm();
-            // delay(500);  // Brief alarm sound
-            // stopAlarm();
         }
     }
     
@@ -635,11 +630,6 @@ void updateWaterTankStatus(float waterTemp, float dhtTemp, float humidity) {
         // Create success result
         testResult = "TEMPERATURE TEST PASSED: Water tank released at " + String(waterTankReleaseTemp, 1) + "°C.";
         testSuccess = true;
-        
-        // Sound brief alarm
-        // startAlarm();
-        // delay(500);
-        // stopAlarm();
 
         triggerAlarm();
     }
@@ -657,11 +647,6 @@ void updateWaterTankStatus(float waterTemp, float dhtTemp, float humidity) {
         // Create failure result
         testResult = "TEMPERATURE TEST FAILED: Water tank reached " + String(waterTemp, 1) + "°C.";
         testSuccess = false;
-        
-        // Sound alarm
-        // startAlarm();
-        // delay(1000);
-        // stopAlarm();
 
         // Trigger the alarm for error release
         triggerAlarmError();
@@ -679,23 +664,58 @@ void updateWaterTankStatus(float waterTemp, float dhtTemp, float humidity) {
 
 // Control relay based on air tank pressure - only during pressure test
 void controlPressureRelay(float pressure) {
+    // Check if pressure limit was exceeded
+    if (pressure >= PRESSURE_LIMIT && !pressureLimitExceeded) {
+        pressureLimitExceeded = true;
+        
+        // Show error message
+        tft.setTextSize(2);
+        tft.fillRect(0, 170, 480, 40, RED);
+        tft.setCursor(20, 180);
+        tft.setTextColor(WHITE);
+        tft.print("PRESSURE LIMIT EXCEEDED: ");
+        tft.print(pressure, 1);
+        tft.print(" psi!");
+        
+        // Create failure result
+        testResult = "PRESSURE TEST FAILED: Pressure limit exceeded (" + String(pressure, 1) + " psi) without valve release.";
+        testSuccess = false;
+        
+        // Trigger alarm
+        triggerAlarmError();
+        
+        // Transition to results screen after a delay
+        if (currentState == TESTING_PRESSURE) {
+            // Set timer to transition to results
+            releaseDetectionTime = millis();
+            lastPressureStored = true;  // Use this flag to initiate transition
+            
+            // Once we've exceeded limit and recorded it, we'll transition to results after delay
+            if (millis() - releaseDetectionTime > 3000) {  // 3 second delay after detection
+                currentState = RESULTS_SCREEN;
+                stateStartTime = millis();
+                drawResultsScreen();
+            }
+        }
+    }
+    
     // Only control relay if we're in the TESTING_PRESSURE state
     if (currentState == TESTING_PRESSURE) {
-        if (pressure >= HIGH_PRESSURE_THRESHOLD) {
-            digitalWrite(RELAY_PIN, LOW);
-        } else {
-            digitalWrite(RELAY_PIN, HIGH);
+        if (pressure >= HIGH_PRESSURE_THRESHOLD || pressureLimitExceeded) {
+            digitalWrite(RELAY_PIN, HIGH);  // Turn relay OFF
+        } else if (!pressureLimitExceeded) {
+            digitalWrite(RELAY_PIN, LOW); // Only turn relay ON if limit not exceeded
         }
     } else {
         // Turn off relay when not in testing state
-        digitalWrite(RELAY_PIN, LOW);
+        digitalWrite(RELAY_PIN, HIGH);
     }
     
     // LED control can remain separate from relay control if desired
     if (pressure >= HIGH_PRESSURE_THRESHOLD) {
         digitalWrite(RED_LED_PIN, HIGH);
         digitalWrite(GREEN_LED_PIN, LOW);
-    } else {
+    } else if (!pressureLimitExceeded) {  // Only reset LEDs if limit not exceeded
         digitalWrite(RED_LED_PIN, LOW);
         digitalWrite(GREEN_LED_PIN, HIGH);
     }
@@ -716,13 +736,13 @@ void controlTemperatureRelay(float temperatureC) {
     if (currentState == TESTING_TEMPERATURE) {
         if (temperatureC >= HIGH_TEMP_THRESHOLD) {
             delay(5000);
-            digitalWrite(RELAY_PIN2, LOW);
-        } else {
             digitalWrite(RELAY_PIN2, HIGH);
+        } else {
+            digitalWrite(RELAY_PIN2, LOW);
         }
     } else {
         // Turn off relay when not in testing state
-        digitalWrite(RELAY_PIN2, LOW);
+        digitalWrite(RELAY_PIN2, HIGH);
     }
     
     // LED control can remain separate from relay control if desired
@@ -786,13 +806,23 @@ void loop() {
     // State machine
     switch (currentState) {
         case SPLASH_SCREEN:
-            // Show splash screen for 2 seconds
-            if (currentTime - stateStartTime >= SPLASH_SCREEN_DURATION) {
-                currentState = START_SCREEN;
-                stateStartTime = currentTime;
-                drawStartScreen();
-            }
-            break;
+        // Check for button press instead of using a timer
+        start_btn.press(down && start_btn.contains(pixel_x, pixel_y));
+    
+        if (start_btn.justReleased()) {
+            start_btn.drawButton();
+        }
+    
+        if (start_btn.justPressed()) {
+            start_btn.drawButton(true);  // Show pressed state
+            delay(200);  // Visual feedback
+        
+            // Transition to start screen
+            currentState = START_SCREEN;
+            stateStartTime = currentTime;
+            drawStartScreen();
+        }
+        break;
             
         case START_SCREEN:
             // Check for button press
@@ -818,14 +848,6 @@ void loop() {
             pressure_btn.press(down && pressure_btn.contains(pixel_x, pixel_y));
             temp_btn.press(down && temp_btn.contains(pixel_x, pixel_y));
             
-            if (pressure_btn.justReleased()) {
-                pressure_btn.drawButton();
-            }
-            
-            if (temp_btn.justReleased()) {
-                temp_btn.drawButton();
-            }
-            
             if (pressure_btn.justPressed()) {
                 pressure_btn.drawButton(true);  // Show pressed state
                 delay(200);  // Visual feedback
@@ -837,9 +859,10 @@ void loop() {
                 // Reset test variables
                 lastPressureStored = false;
                 pressureReleaseDetected = false;
+                pressureLimitExceeded = false;  // Reset the pressure limit flag
 
                 // Ensure temperature relay is off when starting pressure test
-                digitalWrite(RELAY_PIN2, LOW);
+                digitalWrite(RELAY_PIN, HIGH);
 
                 drawTestingScreen(true);  // Draw pressure test screen
             }
@@ -857,7 +880,7 @@ void loop() {
                 waterHighTempNoReleaseError = false;
     
                 // Ensure pressure relay is off when starting temperature test
-                digitalWrite(RELAY_PIN, LOW);
+                digitalWrite(RELAY_PIN, HIGH);
     
                 drawTestingScreen(false);  // Draw temperature test screen
             }
@@ -867,17 +890,17 @@ void loop() {
             // Check for reset/abort button
             reset_btn.press(down && reset_btn.contains(pixel_x, pixel_y));
             
-            if (reset_btn.justReleased()) {
-                reset_btn.drawButton();
-            }
+            // if (reset_btn.justReleased()) {
+            //     reset_btn.drawButton();
+            // }
             
             if (reset_btn.justPressed()) {
                 reset_btn.drawButton(true);  // Show pressed state
                 delay(200);  // Visual feedback
     
                 // Turn off both relays when aborting a test
-                digitalWrite(RELAY_PIN, LOW);
-                digitalWrite(RELAY_PIN2, LOW);
+                digitalWrite(RELAY_PIN, HIGH);
+                digitalWrite(RELAY_PIN2, HIGH);
     
                 // Abort test and return to selection
                 currentState = TEST_SELECTION;
@@ -893,17 +916,17 @@ void loop() {
             // Check for reset/abort button
             reset_btn.press(down && reset_btn.contains(pixel_x, pixel_y));
             
-            if (reset_btn.justReleased()) {
-                reset_btn.drawButton();
-            }
+            // if (reset_btn.justReleased()) {
+            //     reset_btn.drawButton();
+            // }
             
             if (reset_btn.justPressed()) {
                 reset_btn.drawButton(true);  // Show pressed state
                 delay(200);  // Visual feedback
     
                 // Turn off both relays when aborting a test
-                digitalWrite(RELAY_PIN, LOW);
-                digitalWrite(RELAY_PIN2, LOW);
+                digitalWrite(RELAY_PIN, HIGH);
+                digitalWrite(RELAY_PIN2, HIGH);
     
                 // Abort test and return to selection
                 currentState = TEST_SELECTION;
@@ -948,8 +971,8 @@ void loop() {
                 delay(200);  // Visual feedback
 
                 // Turn off both relays when ending testing
-                digitalWrite(RELAY_PIN, LOW);
-                digitalWrite(RELAY_PIN2, LOW);
+                digitalWrite(RELAY_PIN, HIGH);
+                digitalWrite(RELAY_PIN2, HIGH);
         
                 // Go back to start screen
                 currentState = START_SCREEN;
@@ -962,8 +985,8 @@ void loop() {
                 delay(200);  // Visual feedback
 
                 // Turn off both relays when ending testing
-                digitalWrite(RELAY_PIN, LOW);
-                digitalWrite(RELAY_PIN2, LOW);
+                digitalWrite(RELAY_PIN, HIGH);
+                digitalWrite(RELAY_PIN2, HIGH);
         
                 // End testing and return to splash screen
                 currentState = SPLASH_SCREEN;
