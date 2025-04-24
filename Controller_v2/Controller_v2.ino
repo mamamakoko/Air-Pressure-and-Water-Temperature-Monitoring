@@ -37,12 +37,13 @@ const int TS_BOT = 954;
 #define ADC_RESOLUTION 1023          // ADC resolution
 
 // Threshold Constants
-#define HIGH_PRESSURE_THRESHOLD 50.0  // Threshold for pressure alarm (psi)
-#define HIGH_TEMP_THRESHOLD 110.0      // Threshold for temperature alarm (°C)
-#define RELEASE_DETECTION_THRESHOLD 1.86  // Threshold to detect pressure release (psi)
-#define PRESSURE_LIMIT 50.0          // Maximum acceptable release pressure (psi)
-#define WATER_HUMIDITY_THRESHOLD 96.0  // Threshold for high humidity in water tank
-#define WATER_TEMP_DIFF_THRESHOLD 50.0  // Significant temp difference between sensors
+#define HIGH_PRESSURE_THRESHOLD 50.0        // Threshold for pressure alarm (psi)
+#define HIGH_TEMP_THRESHOLD 85.0           // Threshold for temperature alarm (°C)
+#define RELEASE_DETECTION_THRESHOLD 4.9     // Threshold to detect pressure release (psi)
+#define PRESSURE_LIMIT 50.0                 // Maximum acceptable release pressure (psi)
+#define TEMPERATURE_LIMIT 110.0              // Maximum acceptable water temperature (°C)
+#define WATER_HUMIDITY_THRESHOLD 96.0       // Threshold for high humidity in water tank
+#define WATER_TEMP_DIFF_THRESHOLD 50.0      // Significant temp difference between sensors
 
 // Display & Timing Constants
 #define NORMAL_MESSAGE_DURATION 10000  // Duration to show normal messages (ms)
@@ -611,7 +612,7 @@ void updateWaterTankStatus(float waterTemp, float dhtTemp, float humidity) {
                      (dhtTemp > WATER_TEMP_DIFF_THRESHOLD);
     
     // Check for high temperature with no release
-    bool highTempNoRelease = (waterTemp >= HIGH_TEMP_THRESHOLD) && !releaseCondition;
+    bool highTempNoRelease = (waterTemp >= TEMPERATURE_LIMIT) && !releaseCondition;
     
     // Handle normal release condition
     if (releaseCondition && !waterTankReleaseDetected) {
@@ -681,9 +682,6 @@ void controlPressureRelay(float pressure) {
         testResult = "PRESSURE TEST FAILED: Pressure limit exceeded (" + String(pressure, 1) + " psi) without valve release.";
         testSuccess = false;
         
-        // Trigger alarm
-        triggerAlarmError();
-        
         // Transition to results screen after a delay
         if (currentState == TESTING_PRESSURE) {
             // Set timer to transition to results
@@ -703,6 +701,9 @@ void controlPressureRelay(float pressure) {
     if (currentState == TESTING_PRESSURE) {
         if (pressure >= HIGH_PRESSURE_THRESHOLD || pressureLimitExceeded) {
             digitalWrite(RELAY_PIN, HIGH);  // Turn relay OFF
+            
+            // Trigger alarm
+            triggerAlarmError();
         } else if (!pressureLimitExceeded) {
             digitalWrite(RELAY_PIN, LOW); // Only turn relay ON if limit not exceeded
         }
@@ -734,7 +735,7 @@ void controlTemperatureRelay(float temperatureC) {
     
     // Only control relay if we're in the TESTING_TEMPERATURE state
     if (currentState == TESTING_TEMPERATURE) {
-        if (temperatureC >= HIGH_TEMP_THRESHOLD) {
+        if (temperatureC >= TEMPERATURE_LIMIT) {
             delay(5000);
             digitalWrite(RELAY_PIN2, HIGH);
         } else {
@@ -746,7 +747,7 @@ void controlTemperatureRelay(float temperatureC) {
     }
     
     // LED control can remain separate from relay control if desired
-    if (temperatureC >= HIGH_TEMP_THRESHOLD) {
+    if (temperatureC >= TEMPERATURE_LIMIT) {
         digitalWrite(RED_LED_PIN, HIGH);
         digitalWrite(GREEN_LED_PIN, LOW);
     } else {
@@ -1027,45 +1028,54 @@ void loop() {
                 drawStartScreen();
             }
             break;
-        }
+    }
     
-            // Non-blocking sensor reading regardless of state
-            if (currentTime - lastSensorReadTime >= SENSOR_READ_INTERVAL) {
-                // Read all sensors for logging purposes even when not displaying
-                float airPressure = readPressure(PRESSURE_SENSOR_PIN);
-                float airValvePressure = readPressure(SECOND_PRESSURE_SENSOR_PIN);
-                float waterTempC = readTemperatureC();
-                float waterTempF = (waterTempC == TEMP_ERROR_VALUE) ? 
-                        TEMP_ERROR_VALUE : convertToFahrenheit(waterTempC);
+    // Non-blocking sensor reading regardless of state
+    if (currentTime - lastSensorReadTime >= SENSOR_READ_INTERVAL) {
+        // Read all sensors for logging purposes even when not displaying
+        float airPressure = readPressure(PRESSURE_SENSOR_PIN);
+        float airValvePressure = readPressure(SECOND_PRESSURE_SENSOR_PIN);
+        float waterTempC = readTemperatureC();
+        float waterTempF = (waterTempC == TEMP_ERROR_VALUE) ? 
+                TEMP_ERROR_VALUE : convertToFahrenheit(waterTempC);
         
-                float humidity = 0.0;
-                float dhtTempC = 0.0;
-                bool dhtSuccess = readDHT(humidity, dhtTempC);
+        float humidity = 0.0;
+        float dhtTempC = 0.0;
+        bool dhtSuccess = readDHT(humidity, dhtTempC);
 
-                // Log readings to serial
-                Serial.print("Air Tank Pressure: ");
-                Serial.print(airPressure);
-                Serial.print(" psi | Air Valve: ");
-                Serial.print(airValvePressure);
-                Serial.print(" psi | Water Temp: ");
+        // Log readings to serial
+        Serial.print("Air Tank Pressure: ");
+        Serial.print(airPressure);
+        Serial.print(" psi | Air Valve: ");
+        Serial.print(airValvePressure);
+        Serial.print(" psi | Water Temp: ");
         
-                if (waterTempC == TEMP_ERROR_VALUE) {
-                    Serial.println("ERROR - Sensor not connected");
-                } else {
-                    Serial.print(waterTempC);
-                    Serial.println(" °C");
-                }
+        if (waterTempC == TEMP_ERROR_VALUE) {
+            Serial.println("ERROR - Sensor not connected");
+        } else {
+            Serial.print(waterTempC);
+            Serial.println(" °C");
+        }
         
-                if (dhtSuccess) {
-                    Serial.print("Water Tank DHT11: ");
-                    Serial.print(dhtTempC);
-                    Serial.print("°C | Humidity: ");
-                    Serial.print(humidity);
-                    Serial.println("%");
-                } else {
-                    Serial.println("DHT11 Reading Failed");
-                }
+        if (dhtSuccess) {
+            Serial.print("Water Tank DHT11: ");
+            Serial.print(dhtTempC);
+            Serial.print("°C | Humidity: ");
+            Serial.print(humidity);
+            Serial.println("%");
+        } else {
+            Serial.println("DHT11 Reading Failed");
+        }
         
-                lastSensorReadTime = currentTime;
-            }
+        lastSensorReadTime = currentTime;
+    }
+
+    //  Maintain water temperature at HIGH_TEMP_THRESHOLD value
+    if (currentState != TESTING_TEMPERATURE) {
+        if (temperatureC >= HIGH_TEMP_THRESHOLD) {
+            digitalWrite(RELAY_PIN2, HIGH);
+        } else {
+            digitalWrite(RELAY_PIN2, LOW);
+        }
+    }
 }
