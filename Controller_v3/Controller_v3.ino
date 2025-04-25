@@ -4,10 +4,11 @@
 #include <DallasTemperature.h>
 #include <DHT11.h>
 #include <TouchScreen.h>
+#include <Adafruit_BMP085.h>
 
 // Pin Definitions
 #define PRESSURE_SENSOR_PIN A15      // First Pressure Sensor (Air Tank Pressure)
-#define SECOND_PRESSURE_SENSOR_PIN A14  // Second Pressure Sensor (Air Tank T&P Valve)
+//#define SECOND_PRESSURE_SENSOR_PIN A14  // Second Pressure Sensor (Air Tank T&P Valve)
 #define DHT_PIN 23                   // DHT11 data pin for Water Tank
 #define RELAY_PIN 24                 // Relay control for air pressure
 #define RELAY_PIN2 25                // Relay control for water temperature
@@ -42,6 +43,7 @@ const int TS_BOT = 954;
 #define RELEASE_DETECTION_THRESHOLD 4.9     // Threshold to detect pressure release (psi)
 #define PRESSURE_LIMIT 50.0                 // Maximum acceptable release pressure (psi)
 #define TEMPERATURE_LIMIT 110.0              // Maximum acceptable water temperature (°C)
+#define MINIMUM_TEMPERATURE 70.0            // Minimum temperature to maintain
 #define WATER_HUMIDITY_THRESHOLD 96.0       // Threshold for high humidity in water tank
 #define WATER_TEMP_DIFF_THRESHOLD 50.0      // Significant temp difference between sensors
 
@@ -51,7 +53,6 @@ const int TS_BOT = 954;
 #define REFRESH_INTERVAL 500           // Display refresh interval (ms)
 #define SENSOR_READ_INTERVAL 100       // Sensor reading interval (ms)
 #define DHT_READ_RETRY_DELAY 1000      // Time between DHT read retries
-// #define SPLASH_SCREEN_DURATION 5000    // Duration to show splash screen (ms)
 
 // Special Values
 #define TEMP_ERROR_VALUE -999.0        // Value to indicate temperature sensor error
@@ -93,6 +94,9 @@ Adafruit_GFX_Button yes_btn;
 Adafruit_GFX_Button no_btn;
 Adafruit_GFX_Button done_btn;
 
+// BMP085 sensor object
+Adafruit_BMP085 bmp;
+
 // Global variables for touch screen
 int pixel_x, pixel_y;     // Touch coordinates
 
@@ -123,7 +127,6 @@ unsigned long lastSensorReadTime = 0;  // For non-blocking sensor reading
 unsigned long lastRefreshTime = 0;     // For non-blocking display updates
 bool waterTankDisplayActive = false;   // Water tank display status
 unsigned long waterDisplayStartTime = 0; // Water tank display timing
-unsigned long splashScreenStartTime = 0;  // Splash screen timing
 
 // Global variables for recent readings
 float currentAirPressure = 0.0;
@@ -192,6 +195,8 @@ bool Touch_getXY(void) {
     return pressed;
 }
 
+bool bmpSensorError = false; // Add a global flag for BMP085 sensor error
+
 void setup() {
     Serial.begin(9600);
     
@@ -211,7 +216,12 @@ void setup() {
 
     // Initialize sensors
     tempSensor.begin();
-    
+
+    // Initialize BMP085
+    if (!bmp.begin()) {
+        bmpSensorError = true; // Set the error flag
+    }
+
     // Initialize display
     uint16_t ID = tft.readID();
     tft.begin(ID);
@@ -221,10 +231,6 @@ void setup() {
     // Initialize state variables
     currentState = SPLASH_SCREEN;
     stateStartTime = millis();
-    splashScreenStartTime = millis();
-    
-    // Draw the splash screen
-    drawSplashScreen();
 }
 
 void drawSplashScreen() {
@@ -397,15 +403,16 @@ void resetArduino() {
 
 // Read pressure sensor value and convert to PSI
 float readPressure(int pin) {
-    int sensorValue = analogRead(pin);
-    float voltage = (sensorValue / (float)ADC_RESOLUTION) * SENSOR_MAX_VOLTAGE;
-    float pressure = ((voltage - VOLTAGE_OFFSET) / (SENSOR_MAX_VOLTAGE - VOLTAGE_OFFSET)) * SENSOR_MAX_PRESSURE;
-    
-    // Validate reading and handle potential errors
-    if (pressure < 0) return 0.0;
-    if (pressure > SENSOR_MAX_PRESSURE) return SENSOR_MAX_PRESSURE;
-    
-    return pressure;
+    if (pin == PRESSURE_SENSOR_PIN) {
+        // Read pressure from the first analog sensor
+        int sensorValue = analogRead(pin);
+        float voltage = (sensorValue / (float)ADC_RESOLUTION) * SENSOR_MAX_VOLTAGE;
+        float pressure = ((voltage - VOLTAGE_OFFSET) / (SENSOR_MAX_VOLTAGE - VOLTAGE_OFFSET)) * SENSOR_MAX_PRESSURE;
+        return pressure < 0 ? 0.0 : (pressure > SENSOR_MAX_PRESSURE ? SENSOR_MAX_PRESSURE : pressure);
+    } else {
+        // Read pressure from BMP085
+        return bmp.readPressure() / 100.0 * 0.0145038; // Convert Pa to psi
+    }
 }
 
 // Read temperature in Celsius with error handling
@@ -756,18 +763,17 @@ void controlTemperatureRelay(float temperatureC) {
     }
 }
 
-
 void performPressureTest() {
     // Read pressure sensors
     currentAirPressure = readPressure(PRESSURE_SENSOR_PIN);
-    currentAirValvePressure = readPressure(SECOND_PRESSURE_SENSOR_PIN);
-    
+    currentAirValvePressure = readPressure(-1); // Use a dummy value or a specific identifier for BMP085
+
     // Update display
     updatePressureDisplay(currentAirPressure);
-    
+
     // Check for pressure release
     updateAirTankStatus(currentAirValvePressure, currentAirPressure);
-    
+
     // Control relay
     controlPressureRelay(currentAirPressure);
 }
@@ -1031,14 +1037,15 @@ void loop() {
     }
     
     // Non-blocking sensor reading regardless of state
+
     if (currentTime - lastSensorReadTime >= SENSOR_READ_INTERVAL) {
         // Read all sensors for logging purposes even when not displaying
         float airPressure = readPressure(PRESSURE_SENSOR_PIN);
-        float airValvePressure = readPressure(SECOND_PRESSURE_SENSOR_PIN);
+        float airValvePressure = bmp.readPressure() / 100.0 * 0.0145038; // Convert Pa to PSI
         float waterTempC = readTemperatureC();
         float waterTempF = (waterTempC == TEMP_ERROR_VALUE) ? 
                 TEMP_ERROR_VALUE : convertToFahrenheit(waterTempC);
-        
+    
         float humidity = 0.0;
         float dhtTempC = 0.0;
         bool dhtSuccess = readDHT(humidity, dhtTempC);
@@ -1049,14 +1056,14 @@ void loop() {
         Serial.print(" psi | Air Valve: ");
         Serial.print(airValvePressure);
         Serial.print(" psi | Water Temp: ");
-        
+    
         if (waterTempC == TEMP_ERROR_VALUE) {
             Serial.println("ERROR - Sensor not connected");
         } else {
             Serial.print(waterTempC);
             Serial.println(" °C");
         }
-        
+    
         if (dhtSuccess) {
             Serial.print("Water Tank DHT11: ");
             Serial.print(dhtTempC);
@@ -1066,15 +1073,15 @@ void loop() {
         } else {
             Serial.println("DHT11 Reading Failed");
         }
-        
+    
         lastSensorReadTime = currentTime;
     }
 
     //  Maintain water temperature at HIGH_TEMP_THRESHOLD value
     if (currentState != TESTING_TEMPERATURE) {
-        if (temperatureC >= HIGH_TEMP_THRESHOLD) {
+        if (readTemperatureC() >= HIGH_TEMP_THRESHOLD) {
             digitalWrite(RELAY_PIN2, HIGH);
-        } else {
+        } else if (readTemperatureC() <= MINIMUM_TEMPERATURE) {
             digitalWrite(RELAY_PIN2, LOW);
         }
     }
