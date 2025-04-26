@@ -2,20 +2,18 @@
 #include <Adafruit_GFX.h>
 #include <OneWire.h>
 #include <DallasTemperature.h>
-#include <DHT11.h>
 #include <TouchScreen.h>
 #include <Adafruit_BMP085.h>
 
 // Pin Definitions
 #define PRESSURE_SENSOR_PIN A15      // First Pressure Sensor (Air Tank Pressure)
-//#define SECOND_PRESSURE_SENSOR_PIN A14  // Second Pressure Sensor (Air Tank T&P Valve)
-#define DHT_PIN 23                   // DHT11 data pin for Water Tank
 #define RELAY_PIN 24                 // Relay control for air pressure
 #define RELAY_PIN2 25                // Relay control for water temperature
 #define BUZZER_PIN 28                // Buzzer
 #define GREEN_LED_PIN 26             // Green LED (default ON)
 #define RED_LED_PIN 27               // Red LED
 #define TEMP_SENSOR_PIN 22           // DS18B20 Data Pin for Water Tank
+#define SECOND_TEMP_SENSOR_PIN 23  // DS18B20 Data Pin for the second sensor
 
 // Touch Screen Pin Definitions
 #define YP A1
@@ -43,19 +41,18 @@ const int TS_BOT = 954;
 #define RELEASE_DETECTION_THRESHOLD 4.9     // Threshold to detect pressure release (psi)
 #define PRESSURE_LIMIT 50.0                 // Maximum acceptable release pressure (psi)
 #define TEMPERATURE_LIMIT 110.0              // Maximum acceptable water temperature (°C)
-#define MINIMUM_TEMPERATURE 70.0            // Minimum temperature to maintain
-#define WATER_HUMIDITY_THRESHOLD 96.0       // Threshold for high humidity in water tank
-#define WATER_TEMP_DIFF_THRESHOLD 50.0      // Significant temp difference between sensors
+#define MINIMUM_TEMPERATURE 60.0            // Minimum temperature to maintain
+#define WATER_TEMP_RELEASE 50.0      // Significant temp difference between sensors
 
 // Display & Timing Constants
 #define NORMAL_MESSAGE_DURATION 10000  // Duration to show normal messages (ms)
 #define ERROR_MESSAGE_DURATION 60000   // Duration to show error messages (ms)
 #define REFRESH_INTERVAL 500           // Display refresh interval (ms)
 #define SENSOR_READ_INTERVAL 100       // Sensor reading interval (ms)
-#define DHT_READ_RETRY_DELAY 1000      // Time between DHT read retries
 
 // Special Values
 #define TEMP_ERROR_VALUE -999.0        // Value to indicate temperature sensor error
+#define TEMP_ERROR_VALUE2 200.0        // Value to indicate temperature sensor error
 
 // Display Colors
 #define WHITE  0xFFFF
@@ -83,7 +80,8 @@ MCUFRIEND_kbv tft;
 TouchScreen ts = TouchScreen(XP, YP, XM, YM, 300);
 OneWire oneWire(TEMP_SENSOR_PIN);
 DallasTemperature tempSensor(&oneWire);
-DHT11 dht(DHT_PIN);  // Modified for DHT11.h library
+OneWire secondOneWire(SECOND_TEMP_SENSOR_PIN);
+DallasTemperature secondTempSensor(&secondOneWire);
 
 // Button objects
 Adafruit_GFX_Button reset_btn;
@@ -109,15 +107,8 @@ bool pressureLimitExceeded = false;
 
 // Water tank variables
 float lastWaterTankTemp = 0.0;      // Last water tank temperature
-float lastHumidity = 0.0;           // Last humidity reading
 bool waterTankReleaseDetected = false; // Flag for water tank release
 float waterTankReleaseTemp = 0.0;   // Temperature at release
-
-// DHT sensor variables
-float lastValidHumidity = 0.0;      // Last valid humidity reading
-float lastValidDhtTemp = 0.0;       // Last valid DHT temperature reading
-unsigned long lastDhtSuccessTime = 0; // When we last got a good DHT reading
-unsigned long lastDhtReadTime = 0;    // When we last attempted to read DHT
 
 // Display timing variables
 unsigned long displayStartTime = 0;  // Tracks when the message started
@@ -127,15 +118,13 @@ unsigned long lastSensorReadTime = 0;  // For non-blocking sensor reading
 unsigned long lastRefreshTime = 0;     // For non-blocking display updates
 bool waterTankDisplayActive = false;   // Water tank display status
 unsigned long waterDisplayStartTime = 0; // Water tank display timing
+unsigned long splashScreenStartTime = 0;  // Splash screen timing
 
 // Global variables for recent readings
 float currentAirPressure = 0.0;
 float currentAirValvePressure = 0.0;
 float currentWaterTempC = 0.0;  
 float currentWaterTempF = 0.0;
-float currentHumidity = 0.0;
-float currentDhtTempC = 0.0;
-bool currentDhtSuccess = false;
 
 // Global variable for water temperature error
 bool waterHighTempNoReleaseError = false;
@@ -153,12 +142,9 @@ bool Touch_getXY(void);
 float readPressure(int pin);
 float readTemperatureC();
 float convertToFahrenheit(float tempC);
-bool readDHT(float &humidity, float &tempC);
 void updatePressureDisplay(float pressure);
 void updateTemperatureDisplay(float tempC, float tempF);
-void updateDHTDisplay(float humidity, float tempC);
 void updateAirTankStatus(float pressure2, float lastPressureReading);
-void updateWaterTankStatus(float waterTemp, float dhtTemp, float humidity);
 void controlPressureRelay(float pressure);
 void controlTemperatureRelay(float temperatureC);
 void triggerAlarm();
@@ -174,6 +160,8 @@ void drawTestingScreen(bool isPressureTest);
 void drawResultsScreen();
 void performPressureTest();
 void performTemperatureTest();
+
+bool bmpSensorError = false; // Add a global flag for BMP085 sensor error
 
 // Get touch screen coordinates
 bool Touch_getXY(void) {
@@ -195,8 +183,6 @@ bool Touch_getXY(void) {
     return pressed;
 }
 
-bool bmpSensorError = false; // Add a global flag for BMP085 sensor error
-
 void setup() {
     Serial.begin(9600);
     
@@ -216,10 +202,12 @@ void setup() {
 
     // Initialize sensors
     tempSensor.begin();
+    secondTempSensor.begin();
 
-    // Initialize BMP085
+    // Initialize BMP180
     if (!bmp.begin()) {
-        bmpSensorError = true; // Set the error flag
+        Serial.println("Could not find a valid BMP180 sensor!");
+        bmpSensorError = true;
     }
 
     // Initialize display
@@ -231,6 +219,10 @@ void setup() {
     // Initialize state variables
     currentState = SPLASH_SCREEN;
     stateStartTime = millis();
+    splashScreenStartTime = millis();
+    
+    // Draw the splash screen
+    drawSplashScreen();
 }
 
 void drawSplashScreen() {
@@ -281,8 +273,8 @@ void drawTestSelectionScreen() {
     tft.print("Select Test Type");
     
     // Initialize and draw test buttons
-    pressure_btn.initButton(&tft, 240, 120, 340, 70, WHITE, BLUE, BLACK, "PSI TEST", 2);
-    temp_btn.initButton(&tft, 240, 220, 340, 70, WHITE, RED, BLACK, "TEMP TEST", 2);
+    pressure_btn.initButton(&tft, 240, 120, 340, 70, WHITE, BLUE, WHITE, "PSI TEST", 2);
+    temp_btn.initButton(&tft, 240, 220, 340, 70, WHITE, RED, WHITE, "TEMP TEST", 2);
     
     pressure_btn.drawButton();
     temp_btn.drawButton();
@@ -330,11 +322,6 @@ void drawTestingScreen(bool isPressureTest) {
         tft.setCursor(30, 90);
         tft.setTextColor(YELLOW);
         tft.print("Temperature:");
-
-        tft.setTextSize(2);
-        tft.setCursor(30, 120);
-        tft.setTextColor(GREEN);
-        tft.print("Humidity:");
     }
 }
 
@@ -410,8 +397,14 @@ float readPressure(int pin) {
         float pressure = ((voltage - VOLTAGE_OFFSET) / (SENSOR_MAX_VOLTAGE - VOLTAGE_OFFSET)) * SENSOR_MAX_PRESSURE;
         return pressure < 0 ? 0.0 : (pressure > SENSOR_MAX_PRESSURE ? SENSOR_MAX_PRESSURE : pressure);
     } else {
-        // Read pressure from BMP085
-        return bmp.readPressure() / 100.0 * 0.0145038; // Convert Pa to psi
+        // Read pressure from BMP180/085
+        float temp = bmp.readTemperature(); // Read temperature first
+        float pressure = bmp.readPressure(); // Read pressure in Pa
+        
+        if (pressure != 0) {
+            return (pressure / 100.0) * 0.0145038; // Convert Pa to PSI
+        }
+        return -1; // Return error value if reading fails
     }
 }
 
@@ -429,39 +422,17 @@ float readTemperatureC() {
     return temp;
 }
 
-// Read DHT11 data with error handling and caching
-bool readDHT(float &humidity, float &tempC) {
-    unsigned long currentTime = millis();
-    
-    // Only try to read DHT11 if sufficient time has passed since last attempt
-    if (currentTime - lastDhtReadTime >= DHT_READ_RETRY_DELAY) {
-        lastDhtReadTime = currentTime;
+// Read temperature in Celsius with error handling using the second sensor
+float readSecondTemperatureC() {
+    secondTempSensor.requestTemperatures();
+    float temp = secondTempSensor.getTempCByIndex(0);
 
-        int intHumidity, intTemp;
-        
-        // For DHT11.h library
-        int result = dht.readTemperatureHumidity(intTemp, intHumidity);
-        
-        // Check if reading was successful
-        if (result == 0 && intHumidity > 0 && intTemp > 0) {  // Basic validation
-            humidity = intHumidity;
-            tempC = intTemp;
-
-            lastValidHumidity = humidity;
-            lastValidDhtTemp = tempC;
-            lastDhtSuccessTime = currentTime;
-            return true;
-        }
+    // Check for common error values
+    if (temp == -127.0 || temp == 85.0) {
+        return TEMP_ERROR_VALUE;  // Special value to indicate error
+    } else {
+        return temp;
     }
-    
-    // If read failed or not time to read yet, check if we have recent valid data
-    if (currentTime - lastDhtSuccessTime < 30000) {  // Use cache for up to 30 seconds
-        humidity = lastValidHumidity;
-        tempC = lastValidDhtTemp;
-        return true;
-    }
-    
-    return false;
 }
 
 // Convert Celsius to Fahrenheit
@@ -480,40 +451,35 @@ void updatePressureDisplay(float pressure) {
 }
 
 // Update TFT display with DS18B20 temperature readings
-void updateTemperatureDisplay(float tempC, float tempF) {
+void updateTemperatureDisplay(float tempC1, float tempC2) {
     tft.setTextSize(2);
-    tft.fillRect(180, 90, 250, 30, BLACK);
+    tft.fillRect(180, 90, 250, 60, BLACK);  // Increased height to accommodate two readings
     tft.setCursor(180, 90);
     tft.setTextColor(YELLOW);
     
-    if (tempC == TEMP_ERROR_VALUE) {
-        // Display error message instead of temperature
-        tft.print("Error");
+    // Display first sensor
+    if (tempC1 == TEMP_ERROR_VALUE) {
+        tft.setTextColor(RED);
+        tft.print("Sensor 1: Error");
     } else {
-        // Normal temperature display
-        tft.print(tempC, 1);
-        tft.print(" C / ");
-        tft.print(tempF, 1);
-        tft.print(" F");
+        tft.print("S1: ");
+        tft.print(tempC1, 1);
+        tft.print("C/");
+        tft.print(convertToFahrenheit(tempC1), 1);
+        tft.print("F");
     }
-}
-
-// Update TFT display with DHT11 readings
-void updateDHTDisplay(float humidity, float tempC) {
-    tft.setTextSize(2);
-    // Clear previous values
-    tft.fillRect(180, 120, 120, 30, BLACK);
     
+    // Display second sensor
     tft.setCursor(180, 120);
-    tft.setTextColor(GREEN);
-    
-    if (humidity <= 0 || tempC <= 0) {  // Basic validation for DHT11.h library
-        tft.print("Error");
+    if (tempC2 == TEMP_ERROR_VALUE) {
+        tft.setTextColor(RED);
+        tft.print("Sensor 2: Error");
     } else {
-        tft.print(humidity, 1);
-        tft.print("% ");
-        tft.print(tempC, 1);
-        tft.print("C");
+        tft.print("S2: ");
+        tft.print(tempC2, 1);
+        tft.print("C/");
+        tft.print(convertToFahrenheit(tempC2), 1);
+        tft.print("F");
     }
 }
 
@@ -612,62 +578,120 @@ void updateAirTankStatus(float pressure2, float pressureReading) {
 }
 
 // Update TFT display when water tank shows signs of release
-void updateWaterTankStatus(float waterTemp, float dhtTemp, float humidity) {
-    // Logic to detect water tank T&P valve release:
-    // High humidity is a strong indicator
-    bool releaseCondition = (humidity > WATER_HUMIDITY_THRESHOLD) && 
-                     (dhtTemp > WATER_TEMP_DIFF_THRESHOLD);
-    
-    // Check for high temperature with no release
-    bool highTempNoRelease = (waterTemp >= TEMPERATURE_LIMIT) && !releaseCondition;
-    
-    // Handle normal release condition
-    if (releaseCondition && !waterTankReleaseDetected) {
-        waterTankReleaseDetected = true;
-        waterTankReleaseTemp = waterTemp;
-        
-        // Display release information
-        tft.setTextSize(2);
-        tft.fillRect(0, 170, 480, 40, GREEN);
-        tft.setCursor(20, 180);
-        tft.setTextColor(BLACK);
-        tft.print("Water Tank Released at ");
-        tft.print(waterTankReleaseTemp, 1);
-        tft.print("C");
-        
-        // Create success result
-        testResult = "TEMPERATURE TEST PASSED: Water tank released at " + String(waterTankReleaseTemp, 1) + "°C.";
-        testSuccess = true;
+void updateWaterTankStatus(float waterTemp, float secondTemp) {
+    static bool errorMessageShown = false;
+    static unsigned long errorStartTime = 0;
+    static bool releaseMessageShown = false;
+    static bool releaseDetected = false;
 
-        triggerAlarm();
-    }
-    // Handle high temperature with no release error condition
-    else if (highTempNoRelease && !waterHighTempNoReleaseError) {
-        waterHighTempNoReleaseError = true;
-        
-        // Display error information
-        tft.setTextSize(2);
-        tft.fillRect(0, 170, 480, 40, RED);
-        tft.setCursor(20, 180);
-        tft.setTextColor(WHITE);
-        tft.print("WATER TANK ERROR: High temp, no release!");
-        
-        // Create failure result
-        testResult = "TEMPERATURE TEST FAILED: Water tank reached " + String(waterTemp, 1) + "°C.";
-        testSuccess = false;
+    // Print sensor values for debugging
+    Serial.print("Water Tank Temps: ");
+    Serial.print(waterTemp);
+    Serial.print("F, ");
+    Serial.print(secondTemp);
+    Serial.println("F");
 
-        // Trigger the alarm for error release
-        triggerAlarmError();
+    // Check if either sensor has an error
+    if (waterTemp <= TEMP_ERROR_VALUE || secondTemp <= TEMP_ERROR_VALUE || waterTemp >= TEMP_ERROR_VALUE2 || secondTemp >= TEMP_ERROR_VALUE2) {
+        // Reset all test flags
+        waterTankReleaseDetected = false;
+        waterHighTempNoReleaseError = false;
+        waterTankReleaseTemp = 0;
+        releaseDetected = false;
+        releaseMessageShown = false;
+        
+        // Show error message if not already shown
+        if (!errorMessageShown) {
+            tft.setTextSize(2);
+            tft.fillRect(0, 170, 480, 40, RED);
+            tft.setCursor(20, 180);
+            tft.setTextColor(WHITE);
+            tft.print("SENSOR ERROR - Check connections");
+            
+            errorMessageShown = true;
+            errorStartTime = millis();
+            
+            // Update test result
+            testResult = "TEMPERATURE TEST FAILED: Temperature sensor error detected";
+            testSuccess = false;
+
+            // Trigger error alarm
+            triggerAlarmError();
+        }
+
+        // Transition to results screen after delay if in test mode
+        if (currentState == TESTING_TEMPERATURE && (millis() - errorStartTime > 3000)) {
+            currentState = RESULTS_SCREEN;
+            stateStartTime = millis();
+            drawResultsScreen();
+        }
+        return;  // Exit function if there's a sensor error
     }
-    
-    // If already detected a release or error, transition to results after a short delay
-    if ((waterTankReleaseDetected || waterHighTempNoReleaseError) && currentState == TESTING_TEMPERATURE) {
-        if (millis() - stateStartTime > 3000) {  // 3 second delay after detection
+
+    // Reset error message flag if sensors are working
+    errorMessageShown = false;
+
+    // Only proceed with release detection if both sensors are working properly
+    if (waterTemp != TEMP_ERROR_VALUE && secondTemp != TEMP_ERROR_VALUE) {
+        float tempValve = secondTemp;
+        bool releaseCondition = (tempValve >= WATER_TEMP_RELEASE);
+        bool highTempNoRelease = ((waterTemp >= TEMPERATURE_LIMIT || secondTemp >= TEMPERATURE_LIMIT) && !releaseCondition);
+
+        // Handle normal release condition
+        if (releaseCondition && !waterTankReleaseDetected && !releaseMessageShown) {
+            waterTankReleaseDetected = true;
+            releaseMessageShown = true;
+            waterTankReleaseTemp = max(waterTemp, secondTemp);
+            releaseDetectionTime = millis();
+
+            tft.setTextSize(2);
+            tft.fillRect(0, 170, 480, 40, GREEN);
+            tft.setCursor(20, 180);
+            tft.setTextColor(BLACK);
+            tft.print("Water Tank Released at ");
+            tft.print(waterTankReleaseTemp, 1);
+            tft.print("F");
+
+            testResult = "TEMPERATURE TEST PASSED: Water tank released at " + 
+                        String(waterTankReleaseTemp, 1) + "F (Valve temp: " + 
+                        String(tempValve, 1) + "F)";
+            testSuccess = true;
+
+            triggerAlarm();
+        }
+        // Handle high temperature with no release error condition
+        else if (highTempNoRelease && !waterHighTempNoReleaseError) {
+            waterHighTempNoReleaseError = true;
+            releaseDetectionTime = millis();
+            
+            tft.setTextSize(2);
+            tft.fillRect(0, 170, 480, 40, RED);
+            tft.setCursor(20, 180);
+            tft.setTextColor(WHITE);
+            tft.print("ERROR: High temp without release!");
+
+            testResult = "TEMPERATURE TEST FAILED: High temperature (" + 
+                        String(max(waterTemp, secondTemp), 1) + "F) without valve release";
+            testSuccess = false;
+
+            triggerAlarmError();
+        }
+
+        // Transition to results screen after detection and delay
+        if ((waterTankReleaseDetected || waterHighTempNoReleaseError) && 
+            currentState == TESTING_TEMPERATURE && 
+            (millis() - releaseDetectionTime > 3000)) {
             currentState = RESULTS_SCREEN;
             stateStartTime = millis();
             drawResultsScreen();
         }
     }
+
+    // Debug output
+    Serial.print("Release Detected: ");
+    Serial.println(waterTankReleaseDetected ? "Yes" : "No");
+    Serial.print("Error State: ");
+    Serial.println(errorMessageShown ? "Yes" : "No");
 }
 
 // Control relay based on air tank pressure - only during pressure test
@@ -735,7 +759,7 @@ void controlTemperatureRelay(float temperatureC) {
     if (temperatureC == TEMP_ERROR_VALUE) {
         // Just turn relay off when sensor has error
         if (currentState != TESTING_TEMPERATURE) {
-            digitalWrite(RELAY_PIN2, LOW);
+            digitalWrite(RELAY_PIN2, HIGH); //  HIGH means the relay is turned off
         }
         return;
     }
@@ -766,7 +790,7 @@ void controlTemperatureRelay(float temperatureC) {
 void performPressureTest() {
     // Read pressure sensors
     currentAirPressure = readPressure(PRESSURE_SENSOR_PIN);
-    currentAirValvePressure = readPressure(-1); // Use a dummy value or a specific identifier for BMP085
+    currentAirValvePressure = readPressure(-1); // Use -1 for BMP180 reading
 
     // Update display
     updatePressureDisplay(currentAirPressure);
@@ -779,31 +803,18 @@ void performPressureTest() {
 }
 
 void performTemperatureTest() {
-    // Read water temperature sensors
-    currentWaterTempC = readTemperatureC();
-    currentWaterTempF = (currentWaterTempC == TEMP_ERROR_VALUE) ? 
-                        TEMP_ERROR_VALUE : convertToFahrenheit(currentWaterTempC);
+    // Read temperature sensors
+    float waterTempC = readTemperatureC();
+    float waterValveTempC = readSecondTemperatureC();
     
-    // Read humidity sensor
-    currentDhtSuccess = readDHT(currentHumidity, currentDhtTempC);
+    // Update display
+    updateTemperatureDisplay(waterTempC, waterValveTempC);
     
-    // Update displays
-    updateTemperatureDisplay(currentWaterTempC, currentWaterTempF);
+    // Check for temperature release
+    updateWaterTankStatus(convertToFahrenheit(waterTempC), convertToFahrenheit(waterValveTempC));
     
-    if (currentDhtSuccess) {
-        updateDHTDisplay(currentHumidity, currentDhtTempC);
-        
-        // Check for water tank release
-        if (currentWaterTempC != TEMP_ERROR_VALUE) {
-            updateWaterTankStatus(currentWaterTempC, currentDhtTempC, currentHumidity);
-        }
-    } else {
-        // Show error if DHT reading failed
-        updateDHTDisplay(0, 0);
-    }
-    
-    // Control temperature relay
-    controlTemperatureRelay(currentWaterTempC);
+    // Control relay
+    controlTemperatureRelay(waterTempC);
 }
 
 void loop() {
@@ -1037,52 +1048,51 @@ void loop() {
     }
     
     // Non-blocking sensor reading regardless of state
-
     if (currentTime - lastSensorReadTime >= SENSOR_READ_INTERVAL) {
-        // Read all sensors for logging purposes even when not displaying
-        float airPressure = readPressure(PRESSURE_SENSOR_PIN);
-        float airValvePressure = bmp.readPressure() / 100.0 * 0.0145038; // Convert Pa to PSI
-        float waterTempC = readTemperatureC();
-        float waterTempF = (waterTempC == TEMP_ERROR_VALUE) ? 
-                TEMP_ERROR_VALUE : convertToFahrenheit(waterTempC);
+        // Read pressure sensors
+    float airPressure = readPressure(PRESSURE_SENSOR_PIN);
+    float airValvePressure = readPressure(-1); // BMP180 reading
     
-        float humidity = 0.0;
-        float dhtTempC = 0.0;
-        bool dhtSuccess = readDHT(humidity, dhtTempC);
+    // Read temperature sensors
+    float waterTempC = readTemperatureC();
+    float waterValveTempC = readSecondTemperatureC();
+    
+    // Convert temperatures to Fahrenheit for display
+    float waterTempF = (waterTempC != TEMP_ERROR_VALUE) ? convertToFahrenheit(waterTempC) : waterTempC;
+    float waterValveTempF = (waterValveTempC != TEMP_ERROR_VALUE) ? convertToFahrenheit(waterValveTempC) : waterValveTempC;
 
-        // Log readings to serial
-        Serial.print("Air Tank Pressure: ");
-        Serial.print(airPressure);
-        Serial.print(" psi | Air Valve: ");
-        Serial.print(airValvePressure);
-        Serial.print(" psi | Water Temp: ");
-    
-        if (waterTempC == TEMP_ERROR_VALUE) {
-            Serial.println("ERROR - Sensor not connected");
-        } else {
-            Serial.print(waterTempC);
-            Serial.println(" °C");
-        }
-    
-        if (dhtSuccess) {
-            Serial.print("Water Tank DHT11: ");
-            Serial.print(dhtTempC);
-            Serial.print("°C | Humidity: ");
-            Serial.print(humidity);
-            Serial.println("%");
-        } else {
-            Serial.println("DHT11 Reading Failed");
-        }
-    
-        lastSensorReadTime = currentTime;
+    // Log readings to serial - always show values, indicate errors inline
+    Serial.print("Air Tank Pressure: ");
+    Serial.print(airPressure);
+    Serial.print(" psi | Air Valve: ");
+    Serial.print(airValvePressure);
+    Serial.print(" psi | Water Tank: ");
+    Serial.print(waterTempC);
+    Serial.print("°C/");
+    Serial.print(waterTempF);
+    Serial.print("F | Water Valve: ");
+    Serial.print(waterValveTempC);
+    Serial.print("°C/");
+    Serial.print(waterValveTempF);
+    Serial.println("F");
+
+    // Update global variables
+    currentAirPressure = airPressure;
+    currentAirValvePressure = airValvePressure;
+    currentWaterTempC = waterTempC;
+
+    lastSensorReadTime = currentTime;
     }
 
-    //  Maintain water temperature at HIGH_TEMP_THRESHOLD value
+    // Maintain water temperature at HIGH_TEMP_THRESHOLD value when not testing
     if (currentState != TESTING_TEMPERATURE) {
-        if (readTemperatureC() >= HIGH_TEMP_THRESHOLD) {
-            digitalWrite(RELAY_PIN2, HIGH);
-        } else if (readTemperatureC() <= MINIMUM_TEMPERATURE) {
-            digitalWrite(RELAY_PIN2, LOW);
+        float currentTemp = readTemperatureC();
+        if (currentTemp != TEMP_ERROR_VALUE) {
+            if (currentTemp >= HIGH_TEMP_THRESHOLD) {
+                digitalWrite(RELAY_PIN2, HIGH);  // Turn off heater
+            } else if (currentTemp <= MINIMUM_TEMPERATURE) {
+                digitalWrite(RELAY_PIN2, LOW);   // Turn on heater
+            }
         }
     }
 }

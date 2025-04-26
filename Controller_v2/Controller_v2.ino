@@ -1072,7 +1072,7 @@ void loop() {
 
     //  Maintain water temperature at HIGH_TEMP_THRESHOLD value
     if (currentState != TESTING_TEMPERATURE) {
-        if (temperatureC >= HIGH_TEMP_THRESHOLD) {
+        if (readTemperatureC() >= HIGH_TEMP_THRESHOLD) {
             digitalWrite(RELAY_PIN2, HIGH);
         } else {
             digitalWrite(RELAY_PIN2, LOW);
