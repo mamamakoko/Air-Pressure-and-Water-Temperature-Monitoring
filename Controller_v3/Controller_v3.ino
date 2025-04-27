@@ -13,7 +13,7 @@
 #define GREEN_LED_PIN 26             // Green LED (default ON)
 #define RED_LED_PIN 27               // Red LED
 #define TEMP_SENSOR_PIN 22           // DS18B20 Data Pin for Water Tank
-#define SECOND_TEMP_SENSOR_PIN 23  // DS18B20 Data Pin for the second sensor
+#define SECOND_TEMP_SENSOR_PIN 23    // DS18B20 Data Pin for the second sensor
 
 // Touch Screen Pin Definitions
 #define YP A1
@@ -37,12 +37,12 @@ const int TS_BOT = 954;
 
 // Threshold Constants
 #define HIGH_PRESSURE_THRESHOLD 50.0        // Threshold for pressure alarm (psi)
-#define HIGH_TEMP_THRESHOLD 85.0           // Threshold for temperature alarm (°C)
+#define HIGH_TEMP_THRESHOLD 85.0            // Threshold for temperature alarm (°C)
 #define RELEASE_DETECTION_THRESHOLD 4.9     // Threshold to detect pressure release (psi)
 #define PRESSURE_LIMIT 50.0                 // Maximum acceptable release pressure (psi)
-#define TEMPERATURE_LIMIT 110.0              // Maximum acceptable water temperature (°C)
+#define TEMPERATURE_LIMIT 110.0             // Maximum acceptable water temperature (°C)
 #define MINIMUM_TEMPERATURE 60.0            // Minimum temperature to maintain
-#define WATER_TEMP_RELEASE 50.0      // Significant temp difference between sensors
+#define WATER_TEMP_RELEASE 50.0             // Significant temp difference between sensors
 
 // Display & Timing Constants
 #define NORMAL_MESSAGE_DURATION 10000  // Duration to show normal messages (ms)
@@ -99,26 +99,26 @@ Adafruit_BMP085 bmp;
 int pixel_x, pixel_y;     // Touch coordinates
 
 // Air tank variables
-float lastPressureReading = 0.0;    // Store last valid pressure from the first sensor
-bool lastPressureStored = false;    // Flag to store pressure only once
-bool pressureReleaseDetected = false; // Flag for pressure release
+float lastPressureReading = 0.0;        // Store last valid pressure from the first sensor
+bool lastPressureStored = false;        // Flag to store pressure only once
+bool pressureReleaseDetected = false;   // Flag for pressure release
 unsigned long releaseDetectionTime = 0;
 bool pressureLimitExceeded = false;
 
 // Water tank variables
-float lastWaterTankTemp = 0.0;      // Last water tank temperature
-bool waterTankReleaseDetected = false; // Flag for water tank release
-float waterTankReleaseTemp = 0.0;   // Temperature at release
+float lastWaterTankTemp = 0.0;          // Last water tank temperature
+bool waterTankReleaseDetected = false;  // Flag for water tank release
+float waterTankReleaseTemp = 0.0;       // Temperature at release
 
 // Display timing variables
-unsigned long displayStartTime = 0;  // Tracks when the message started
-bool displayActive = false;          // Tracks if the message is currently displayed
-bool errorDisplayed = false;         // Tracks if an error message is displayed
-unsigned long lastSensorReadTime = 0;  // For non-blocking sensor reading
-unsigned long lastRefreshTime = 0;     // For non-blocking display updates
-bool waterTankDisplayActive = false;   // Water tank display status
-unsigned long waterDisplayStartTime = 0; // Water tank display timing
-unsigned long splashScreenStartTime = 0;  // Splash screen timing
+unsigned long displayStartTime = 0;         // Tracks when the message started
+bool displayActive = false;                 // Tracks if the message is currently displayed
+bool errorDisplayed = false;                // Tracks if an error message is displayed
+unsigned long lastSensorReadTime = 0;       // For non-blocking sensor reading
+unsigned long lastRefreshTime = 0;          // For non-blocking display updates
+bool waterTankDisplayActive = false;        // Water tank display status
+unsigned long waterDisplayStartTime = 0;    // Water tank display timing
+unsigned long splashScreenStartTime = 0;    // Splash screen timing
 
 // Global variables for recent readings
 float currentAirPressure = 0.0;
